@@ -1,6 +1,6 @@
 {
   "name": "nanoclaw",
-  "version": "1.2.12",
+  "version": "1.2.14",
   "description": "Personal Claude assistant. Lightweight, secure, customizable.",
   "type": "module",
   "main": "dist/index.js",
@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
-    "@types/node": "^22.19.15",
+    "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^4.0.18",
     "husky": "^9.1.7",
     "prettier": "^3.8.1",
