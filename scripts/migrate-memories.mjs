@@ -19,8 +19,13 @@ if (!GEMINI_API_KEY) {
   process.exit(1);
 }
 
-const backupFile = process.argv[2] || '/root/.openclaw/memory/backups/memory-backup-2026-03-11.jsonl';
-const lancedbDir = process.argv[3] || './groups/telegram_main/memory/lancedb';
+const backupFile = process.argv[2];
+const lancedbDir = process.argv[3];
+
+if (!backupFile || !lancedbDir) {
+  console.error('Usage: node scripts/migrate-memories.mjs <backup.jsonl> <lancedb-dir>');
+  process.exit(1);
+}
 
 async function getEmbedding(text) {
   const resp = await fetch(
