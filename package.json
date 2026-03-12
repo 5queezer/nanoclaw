@@ -21,6 +21,7 @@
   "dependencies": {
     "@lancedb/lancedb": "^0.26.2",
     "better-sqlite3": "^11.8.1",
+    "grammy": "^1.39.3",
     "cron-parser": "^5.5.0",
     "grammy": "^1.39.3",
     "pino": "^9.6.0",
