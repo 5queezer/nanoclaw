@@ -30,6 +30,10 @@ RUN apt-get update && apt-get install -y \
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
+# Install Himalaya CLI for Gmail access (statically linked, copied from host)
+COPY himalaya /usr/local/bin/himalaya
+RUN chmod +x /usr/local/bin/himalaya
+
 # Install agent-browser and claude-code globally
 RUN npm install -g agent-browser @anthropic-ai/claude-code
 
