@@ -33,10 +33,13 @@ async function getEmbedding(text: string): Promise<number[]> {
   if (!apiKey) throw new Error('GEMINI_API_KEY not set');
 
   const resp = await fetch(
-    `${GEMINI_BASE_URL}/models/${EMBEDDING_MODEL}:embedContent?key=${apiKey}`,
+    `${GEMINI_BASE_URL}/models/${EMBEDDING_MODEL}:embedContent`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
       body: JSON.stringify({
         model: `models/${EMBEDDING_MODEL}`,
         content: { parts: [{ text }] },
@@ -158,7 +161,7 @@ export async function memorySearch(
 export async function memoryDelete(id: string): Promise<void> {
   const tbl = await getTable();
   const safe = id.replace(/[^a-z0-9_-]/gi, '');
-  await tbl.delete(`id = "${safe}"`);
+  await tbl.delete(`id = '${safe}'`);
 }
 
 export async function memoryCount(): Promise<number> {

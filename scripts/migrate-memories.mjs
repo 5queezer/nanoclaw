@@ -19,27 +19,44 @@ if (!GEMINI_API_KEY) {
   process.exit(1);
 }
 
-const backupFile = process.argv[2] || '/root/.openclaw/memory/backups/memory-backup-2026-03-11.jsonl';
-const lancedbDir = process.argv[3] || './groups/telegram_main/memory/lancedb';
+const backupFile = process.argv[2];
+const lancedbDir = process.argv[3];
 
-async function getEmbedding(text) {
-  const resp = await fetch(
-    `${GEMINI_BASE_URL}/models/${EMBEDDING_MODEL}:embedContent?key=${GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: `models/${EMBEDDING_MODEL}`,
-        content: { parts: [{ text }] },
-      }),
-    },
-  );
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`Gemini embedding failed (${resp.status}): ${err}`);
+if (!backupFile || !lancedbDir) {
+  console.error('Usage: node scripts/migrate-memories.mjs <backup.jsonl> <lancedb-dir>');
+  process.exit(1);
+}
+
+async function getEmbedding(text, retries = 3) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const resp = await fetch(
+      `${GEMINI_BASE_URL}/models/${EMBEDDING_MODEL}:embedContent`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': GEMINI_API_KEY,
+        },
+        body: JSON.stringify({
+          model: `models/${EMBEDDING_MODEL}`,
+          content: { parts: [{ text }] },
+        }),
+      },
+    );
+    if (resp.status === 429 || (resp.status >= 500 && attempt < retries)) {
+      const wait = Math.pow(2, attempt + 1) * 1000;
+      console.warn(`Rate limited (${resp.status}), retrying in ${wait / 1000}s...`);
+      await new Promise(r => setTimeout(r, wait));
+      continue;
+    }
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`Gemini embedding failed (${resp.status}): ${err}`);
+    }
+    const data = await resp.json();
+    return data.embedding.values;
   }
-  const data = await resp.json();
-  return data.embedding.values;
+  throw new Error('Gemini embedding failed after retries');
 }
 
 async function main() {
