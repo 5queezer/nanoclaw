@@ -24,7 +24,7 @@ describe('GmailChannel', () => {
   describe('ownsJid', () => {
     it('returns true for gmail: prefixed JIDs', () => {
       expect(channel.ownsJid('gmail:abc123')).toBe(true);
-      expect(channel.ownsJid('gmail:thread-id-456')).toBe(true);
+      expect(channel.ownsJid('gmail:456:user@test.com:Subject')).toBe(true);
     });
 
     it('returns false for non-gmail JIDs', () => {
@@ -58,12 +58,6 @@ describe('GmailChannel', () => {
     it('accepts custom poll interval', () => {
       const ch = new GmailChannel(makeOpts(), 30000);
       expect(ch.name).toBe('gmail');
-    });
-
-    it('defaults to unread query when no filter configured', () => {
-      const ch = new GmailChannel(makeOpts());
-      const query = (ch as unknown as { buildQuery: () => string }).buildQuery();
-      expect(query).toBe('is:unread category:primary');
     });
 
     it('defaults with no options provided', () => {
