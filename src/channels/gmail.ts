@@ -116,12 +116,17 @@ export class GmailChannel implements Channel {
       return;
     }
 
-    const replySubject = subject.startsWith('Re:') ? subject : `Re: ${subject}`;
+    // Sanitise to prevent header injection: strip CR/LF from header values
+    const sanitize = (v: string) => v.replace(/[\r\n]+/g, ' ').trim();
+    const safeEmail = sanitize(toEmail);
+    const safeSubject = sanitize(
+      subject.startsWith('Re:') ? subject : `Re: ${subject}`,
+    );
 
     // Build RFC 2822 message
     const message = [
-      `To: ${toEmail}`,
-      `Subject: ${replySubject}`,
+      `To: ${safeEmail}`,
+      `Subject: ${safeSubject}`,
       'Content-Type: text/plain; charset=utf-8',
       '',
       text,
