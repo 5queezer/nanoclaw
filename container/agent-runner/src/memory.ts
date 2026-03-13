@@ -115,7 +115,7 @@ export async function memoryStore(
       importance,
       timestamp: Date.now(),
       metadata: JSON.stringify(meta),
-      vector: new Float32Array(vector),
+      vector,
     },
   ]);
 
@@ -140,7 +140,7 @@ export async function memorySearch(
   const tbl = await getTable();
   const vector = await getEmbedding(query);
 
-  let search = tbl.search(new Float32Array(vector)).limit(limit);
+  let search = tbl.search(vector).limit(limit);
   if (category) {
     const safe = category.replace(/[^a-z_]/gi, '');
     search = search.where(`category = '${safe}'`);
