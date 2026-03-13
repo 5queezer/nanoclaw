@@ -115,7 +115,7 @@ export async function memoryStore(
       importance,
       timestamp: Date.now(),
       metadata: JSON.stringify(meta),
-      vector: new Float32Array(vector),
+      vector,
     },
   ]);
 
