@@ -32,11 +32,7 @@ import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
 // Tool credentials (not Claude API secrets) — passed to containers for MCP tools
-const toolSecrets = readEnvFile([
-  'GEMINI_API_KEY',
-  'LANCEDB_URI',
-  'LANCEDB_API_KEY',
-]);
+const toolSecrets = readEnvFile(['GEMINI_API_KEY', 'LANCEDB_URI', 'LANCEDB_API_KEY']);
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -172,14 +168,14 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Himalaya config directory (for Gmail via Himalaya CLI in the container)
+  // Gmail credentials directory (for Gmail MCP inside the container)
   const homeDir = os.homedir();
-  const himalayaDir = path.join(homeDir, '.config', 'himalaya');
-  if (fs.existsSync(himalayaDir)) {
+  const gmailDir = path.join(homeDir, '.gmail-mcp');
+  if (fs.existsSync(gmailDir)) {
     mounts.push({
-      hostPath: himalayaDir,
-      containerPath: '/home/node/.config/himalaya',
-      readonly: true,
+      hostPath: gmailDir,
+      containerPath: '/home/node/.gmail-mcp',
+      readonly: false, // MCP may need to refresh OAuth tokens
     });
   }
 
