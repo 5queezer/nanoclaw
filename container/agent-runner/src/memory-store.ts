@@ -553,7 +553,7 @@ export class MemoryStore {
     let candidates: any[];
     if (isFullId) {
       candidates = await this.table!.query()
-        .where(`id = '${id}'`)
+        .where(`id = '${escapeSqlLiteral(id)}'`)
         .limit(1)
         .toArray();
     } else {
@@ -585,7 +585,7 @@ export class MemoryStore {
       throw new Error(`Memory ${resolvedId} is outside accessible scopes`);
     }
 
-    await this.table!.delete(`id = '${resolvedId}'`);
+    await this.table!.delete(`id = '${escapeSqlLiteral(resolvedId)}'`);
     return true;
   }
 
@@ -763,10 +763,11 @@ export class MemoryStore {
       metadata: updates.metadata ?? ((row.metadata as string) || "{}"),
     };
 
-    // LanceDB doesn't support in-place update; delete + re-add
+    // LanceDB doesn't support in-place update; add new row first, then delete old.
+    // This order ensures the entry survives a crash between the two operations.
     const resolvedId = escapeSqlLiteral(row.id as string);
-    await this.table!.delete(`id = '${resolvedId}'`);
     await this.table!.add([updated]);
+    await this.table!.delete(`id = '${resolvedId}'`);
 
     return updated;
   }
@@ -786,8 +787,10 @@ export class MemoryStore {
       conditions.push(`(${scopeConditions})`);
     }
 
-    if (beforeTimestamp) {
-      conditions.push(`timestamp < ${beforeTimestamp}`);
+    if (beforeTimestamp !== undefined) {
+      const ts = Math.trunc(Number(beforeTimestamp));
+      if (!Number.isFinite(ts)) throw new Error('beforeTimestamp must be a finite number');
+      conditions.push(`timestamp < ${ts}`);
     }
 
     if (conditions.length === 0) {

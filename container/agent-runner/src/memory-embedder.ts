@@ -10,7 +10,7 @@
 
 import OpenAI from "openai";
 import { createHash } from "node:crypto";
-import { smartChunk } from "./chunker.js";
+import { smartChunk } from "./memory-chunker.js";
 
 // ============================================================================
 // Embedding Cache (LRU with TTL)
@@ -476,7 +476,7 @@ export class Embedder {
     return payload;
   }
 
-  private async embedSingle(text: string, task?: string): Promise<number[]> {
+  private async embedSingle(text: string, task?: string, _depth = 0): Promise<number[]> {
     if (!text || text.trim().length === 0) {
       throw new Error("Cannot embed empty text");
     }
@@ -500,7 +500,7 @@ export class Embedder {
       const errorMsg = error instanceof Error ? error.message : String(error);
       const isContextError = /context|too long|exceed|length/i.test(errorMsg);
 
-      if (isContextError && this._autoChunk) {
+      if (isContextError && this._autoChunk && _depth === 0) {
         try {
           console.log(`Document exceeded context limit (${errorMsg}), attempting chunking...`);
           const chunkResult = smartChunk(text, this._model);
@@ -514,7 +514,7 @@ export class Embedder {
           const chunkEmbeddings = await Promise.all(
             chunkResult.chunks.map(async (chunk, idx) => {
               try {
-                const embedding = await this.embedSingle(chunk, task);
+                const embedding = await this.embedSingle(chunk, task, _depth + 1);
                 return { embedding };
               } catch (chunkError) {
                 console.warn(`Failed to embed chunk ${idx}:`, chunkError);
@@ -534,7 +534,10 @@ export class Embedder {
             new Array(this.dimensions).fill(0)
           );
 
-          const finalEmbedding = avgEmbedding.map(v => v / chunkEmbeddings.length);
+          const rawAvg = avgEmbedding.map(v => v / chunkEmbeddings.length);
+          // L2-normalize so cosine similarity remains valid after averaging
+          const norm = Math.sqrt(rawAvg.reduce((s, v) => s + v * v, 0)) || 1;
+          const finalEmbedding = rawAvg.map(v => v / norm);
           
           // Cache the result for the original text (using its hash)
           this._cache.set(text, task, finalEmbedding);
@@ -579,7 +582,8 @@ export class Embedder {
     });
 
     if (validTexts.length === 0) {
-      return texts.map(() => []);
+      // Return zero vectors of correct dimension so callers don't get shape mismatches
+      return texts.map(() => new Array(this.dimensions).fill(0));
     }
 
     try {

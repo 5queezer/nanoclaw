@@ -1,6 +1,6 @@
 /**
  * Hybrid Retrieval System
- * Combines vector search + BM25 full-text search with RRF fusion
+ * Combines vector search + BM25 full-text search with score fusion
  */
 
 import type { MemoryStore, MemorySearchResult } from "./store.js";
@@ -568,7 +568,7 @@ export class MemoryRetriever {
       },
     );
 
-    // Fuse results using RRF (async: validates BM25-only entries exist in store)
+    // Fuse results (vector score base + BM25 bonus; async batch ghost-check for BM25-only)
     const fusedResults = await this.fuseResults(
       vectorResults,
       bm25Results,
@@ -710,24 +710,12 @@ export class MemoryRetriever {
     // Get all unique document IDs
     const allIds = new Set([...vectorMap.keys(), ...bm25Map.keys()]);
 
-    // Calculate RRF scores
+    // Calculate fused scores (vector base + optional BM25 bonus)
     const fusedResults: RetrievalResult[] = [];
 
     for (const id of allIds) {
       const vectorResult = vectorMap.get(id);
       const bm25Result = bm25Map.get(id);
-
-      // FIX(#15): BM25-only results may be "ghost" entries whose vector data was
-      // deleted but whose FTS index entry lingers until the next index rebuild.
-      // Validate that the entry actually exists in the store before including it.
-      if (!vectorResult && bm25Result) {
-        try {
-          const exists = await this.store.hasId(id);
-          if (!exists) continue; // Skip ghost entry
-        } catch {
-          // If hasId fails, keep the result (fail-open)
-        }
-      }
 
       // Use the result with more complete data (prefer vector result if both exist)
       const baseResult = vectorResult || bm25Result!;
@@ -764,8 +752,32 @@ export class MemoryRetriever {
       });
     }
 
+    // Batch ghost-check: BM25-only results whose FTS index may be stale.
+    // One query fetches all candidate IDs at once instead of N sequential hasId() calls.
+    const bm25OnlyIds = fusedResults
+      .filter(r => !r.sources.vector && r.sources.bm25)
+      .map(r => r.entry.id);
+
+    let liveIds: Set<string> | null = null;
+    if (bm25OnlyIds.length > 0) {
+      try {
+        const escapedIds = bm25OnlyIds.map(id => `'${id.replace(/'/g, "''")}'`).join(', ');
+        const rows = await (this.store as any).table?.query()
+          .where(`id IN (${escapedIds})`)
+          .select(['id'])
+          .toArray() ?? [];
+        liveIds = new Set(rows.map((r: any) => r.id as string));
+      } catch {
+        // fail-open: keep all results if the check itself errors
+      }
+    }
+
+    const deghostResults = liveIds
+      ? fusedResults.filter(r => r.sources.vector || liveIds!.has(r.entry.id))
+      : fusedResults;
+
     // Sort by fused score descending
-    const sorted = fusedResults.sort((a, b) => b.score - a.score);
+    const sorted = deghostResults.sort((a, b) => b.score - a.score);
     this.pushTrace(trace, "fuse", allIds.size, sorted.length, Date.now() - startedAt, {
       vectorCount: vectorResults.length,
       bm25Count: bm25Results.length,
