@@ -231,7 +231,7 @@ export class MemoryStore {
       };
 
       try {
-        table = await db.createTable(TABLE_NAME, [schemaEntry]);
+        table = await db.createTable(TABLE_NAME, [schemaEntry as unknown as Record<string, unknown>]);
         await table.delete('id = "__schema__"');
       } catch (createErr) {
         // Race: another caller (or eventual consistency) created the table
@@ -324,7 +324,7 @@ export class MemoryStore {
     };
 
     try {
-      await this.table!.add([fullEntry]);
+      await this.table!.add([fullEntry as unknown as Record<string, unknown>]);
     } catch (err: any) {
       const code = err.code || "";
       const message = err.message || String(err);
@@ -364,7 +364,7 @@ export class MemoryStore {
       metadata: entry.metadata || "{}",
     };
 
-    await this.table!.add([full]);
+    await this.table!.add([full as unknown as Record<string, unknown>]);
     return full;
   }
 
@@ -766,7 +766,7 @@ export class MemoryStore {
     // LanceDB doesn't support in-place update; add new row first, then delete old.
     // This order ensures the entry survives a crash between the two operations.
     const resolvedId = escapeSqlLiteral(row.id as string);
-    await this.table!.add([updated]);
+    await this.table!.add([updated as unknown as Record<string, unknown>]);
     await this.table!.delete(`id = '${resolvedId}'`);
 
     return updated;

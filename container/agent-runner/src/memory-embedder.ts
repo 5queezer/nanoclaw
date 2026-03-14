@@ -595,7 +595,7 @@ export class Embedder {
       const results: number[][] = new Array(texts.length);
 
       // Fill in embeddings for valid texts
-      response.data.forEach((item, idx) => {
+      response.data.forEach((item: any, idx: number) => {
         const originalIndex = validIndices[idx];
         const embedding = item.embedding as number[];
 

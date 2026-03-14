@@ -3,15 +3,15 @@
  * Combines vector search + BM25 full-text search with score fusion
  */
 
-import type { MemoryStore, MemorySearchResult } from "./store.js";
-import type { Embedder } from "./embedder.js";
-import { filterNoise } from "./noise-filter.js";
-import { expandQuery } from "./query-expander.js";
+import type { MemoryStore, MemorySearchResult } from "./memory-store.js";
+import type { Embedder } from "./memory-embedder.js";
+import { filterNoise } from "./memory-noise-filter.js";
+import { expandQuery } from "./memory-query-expander.js";
 import {
   AccessTracker,
   parseAccessMetadata,
   computeEffectiveHalfLife,
-} from "./access-tracker.js";
+} from "./memory-access-tracker.js";
 
 // ============================================================================
 // Types & Configuration

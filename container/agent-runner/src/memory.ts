@@ -41,6 +41,7 @@ function getStore(): MemoryStore {
 function getEmbedder(): Embedder {
   if (!_embedder) {
     _embedder = new Embedder({
+      provider:   'openai-compatible',
       apiKey:     GEMINI_API_KEY,
       baseURL:    GEMINI_OPENAI_BASE,
       model:      EMBEDDING_MODEL,
