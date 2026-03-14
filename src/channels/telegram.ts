@@ -1,12 +1,19 @@
+import path from 'path';
 import https from 'https';
 import { Api, Bot } from 'grammy';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, DATA_DIR, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
+import {
+  downloadFile,
+  getTelegramFileUrl,
+  getFileExtension,
+} from '../file-downloader.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
+  NewMessage,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
@@ -51,6 +58,59 @@ export class TelegramChannel implements Channel {
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
     this.opts = opts;
+  }
+
+  /**
+   * Download a Telegram file by file_id and return the local path.
+   * Returns null on any failure (graceful degradation).
+   */
+  private async downloadTelegramFile(
+    fileId: string,
+    chatJid: string,
+    messageId: string,
+    mimeType?: string,
+  ): Promise<string | null> {
+    if (!this.bot) return null;
+    try {
+      const fileInfo = await this.bot.api.getFile(fileId);
+      if (!fileInfo.file_path) {
+        logger.warn({ fileId }, 'Telegram getFile returned no file_path');
+        return null;
+      }
+
+      // Check file size before downloading (file_size may not always be present)
+      const MAX_SIZE = 20 * 1024 * 1024; // 20MB
+      if (fileInfo.file_size && fileInfo.file_size > MAX_SIZE) {
+        logger.warn(
+          { fileId, size: fileInfo.file_size },
+          'Telegram file too large (>20MB), skipping download',
+        );
+        return null;
+      }
+
+      const ext = getFileExtension(fileInfo.file_path, mimeType);
+      const safeJid = chatJid.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const destPath = path.join(
+        DATA_DIR,
+        'media',
+        safeJid,
+        `${messageId}.${ext}`,
+      );
+
+      const url = getTelegramFileUrl(this.botToken, fileInfo.file_path);
+      const localPath = await downloadFile(url, destPath);
+
+      if (localPath) {
+        logger.info(
+          { fileId, localPath },
+          'Telegram media file downloaded successfully',
+        );
+      }
+      return localPath;
+    } catch (err) {
+      logger.warn({ fileId, err }, 'Failed to download Telegram media file');
+      return null;
+    }
   }
 
   async connect(): Promise<void> {
@@ -159,22 +219,92 @@ export class TelegramChannel implements Channel {
       );
     });
 
-    // Handle non-text messages with placeholders so the agent knows something was sent
-    const storeNonText = (ctx: any, placeholder: string) => {
+    // Helper to build common message fields from a Telegram context
+    const buildBaseFields = (ctx: any) => {
       const chatJid = `tg:${ctx.chat.id}`;
-      const group = this.opts.registeredGroups()[chatJid];
-      if (!group) return;
-
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
       const senderName =
         ctx.from?.first_name ||
         ctx.from?.username ||
         ctx.from?.id?.toString() ||
         'Unknown';
+      const sender = ctx.from?.id?.toString() || '';
+      const msgId = ctx.message.message_id.toString();
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
-
       const isGroup =
         ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+      return { chatJid, timestamp, senderName, sender, msgId, caption, isGroup };
+    };
+
+    /**
+     * Download a media file and deliver the message with the local path embedded
+     * in the content string. Falls back to the placeholder if download fails.
+     */
+    const storeWithDownload = async (
+      ctx: any,
+      fileId: string,
+      placeholder: string,
+      mimeType?: string,
+    ) => {
+      const { chatJid, timestamp, senderName, sender, msgId, caption, isGroup } =
+        buildBaseFields(ctx);
+
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
+
+      // Attempt to download; fall back gracefully
+      const localPath = await this.downloadTelegramFile(
+        fileId,
+        chatJid,
+        msgId,
+        mimeType,
+      );
+
+      let content: string;
+      let attachments: string[] | undefined;
+
+      if (localPath) {
+        // Extract the label from placeholder e.g. "[Photo]" -> "Photo"
+        const label = placeholder.replace(/^\[/, '').replace(/\]$/, '');
+        content = `[${label}: ${localPath}]${caption}`;
+        attachments = [localPath];
+      } else {
+        content = `${placeholder}${caption}`;
+      }
+
+      const msg: NewMessage = {
+        id: msgId,
+        chat_jid: chatJid,
+        sender,
+        sender_name: senderName,
+        content,
+        timestamp,
+        is_from_me: false,
+        attachments,
+      };
+
+      this.opts.onMessage(chatJid, msg);
+    };
+
+    /**
+     * Fallback for media types that don't need downloading
+     * (stickers, location, contact).
+     */
+    const storeNonText = (ctx: any, placeholder: string) => {
+      const { chatJid, timestamp, senderName, sender, msgId, caption, isGroup } =
+        buildBaseFields(ctx);
+
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
       this.opts.onChatMetadata(
         chatJid,
         timestamp,
@@ -183,9 +313,9 @@ export class TelegramChannel implements Channel {
         isGroup,
       );
       this.opts.onMessage(chatJid, {
-        id: ctx.message.message_id.toString(),
+        id: msgId,
         chat_jid: chatJid,
-        sender: ctx.from?.id?.toString() || '',
+        sender,
         sender_name: senderName,
         content: `${placeholder}${caption}`,
         timestamp,
@@ -193,14 +323,71 @@ export class TelegramChannel implements Channel {
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
-    this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
-    this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
-    this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
-    this.bot.on('message:document', (ctx) => {
-      const name = ctx.message.document?.file_name || 'file';
-      storeNonText(ctx, `[Document: ${name}]`);
+    this.bot.on('message:photo', async (ctx) => {
+      // Use the last (highest quality) photo size
+      const photos: Array<{ file_id: string }> | undefined = ctx.message.photo;
+      const photo = photos && photos.length > 0 ? photos[photos.length - 1] : undefined;
+      if (photo?.file_id) {
+        await storeWithDownload(ctx, photo.file_id, '[Photo]', 'image/jpeg');
+      } else {
+        storeNonText(ctx, '[Photo]');
+      }
     });
+
+    this.bot.on('message:video', async (ctx) => {
+      const video: { file_id: string; mime_type?: string } | undefined =
+        ctx.message.video;
+      if (video?.file_id) {
+        await storeWithDownload(ctx, video.file_id, '[Video]', video.mime_type);
+      } else {
+        storeNonText(ctx, '[Video]');
+      }
+    });
+
+    this.bot.on('message:voice', async (ctx) => {
+      const voice: { file_id: string; mime_type?: string } | undefined =
+        ctx.message.voice;
+      if (voice?.file_id) {
+        await storeWithDownload(
+          ctx,
+          voice.file_id,
+          '[Voice message]',
+          voice.mime_type,
+        );
+      } else {
+        storeNonText(ctx, '[Voice message]');
+      }
+    });
+
+    this.bot.on('message:audio', async (ctx) => {
+      const audio: { file_id: string; mime_type?: string } | undefined =
+        ctx.message.audio;
+      if (audio?.file_id) {
+        await storeWithDownload(ctx, audio.file_id, '[Audio]', audio.mime_type);
+      } else {
+        storeNonText(ctx, '[Audio]');
+      }
+    });
+
+    this.bot.on('message:document', async (ctx) => {
+      const doc: {
+        file_id: string;
+        file_name?: string;
+        mime_type?: string;
+      } | undefined = ctx.message.document;
+      const name = doc?.file_name || 'file';
+      if (doc?.file_id) {
+        await storeWithDownload(
+          ctx,
+          doc.file_id,
+          `[Document: ${name}]`,
+          doc.mime_type,
+        );
+      } else {
+        storeNonText(ctx, `[Document: ${name}]`);
+      }
+    });
+
     this.bot.on('message:sticker', (ctx) => {
       const emoji = ctx.message.sticker?.emoji || '';
       storeNonText(ctx, `[Sticker ${emoji}]`);
