@@ -34,14 +34,26 @@ import { RegisteredGroup } from './types.js';
 // Tool credentials (not Claude API secrets) — passed to containers for MCP tools
 const TOOL_SECRET_KEYS = [
   // LanceDB storage
-  'LANCEDB_URI', 'LANCEDB_API_KEY', 'MEMORY_LANCEDB_DIR',
+  'LANCEDB_URI',
+  'LANCEDB_API_KEY',
+  'MEMORY_LANCEDB_DIR',
   // Embedding providers
-  'EMBEDDING_PROVIDER', 'EMBEDDING_API_KEY', 'EMBEDDING_MODEL',
-  'EMBEDDING_BASE_URL', 'EMBEDDING_DIM',
-  'GEMINI_API_KEY', 'JINA_API_KEY', 'OPENAI_API_KEY',
+  'EMBEDDING_PROVIDER',
+  'EMBEDDING_API_KEY',
+  'EMBEDDING_MODEL',
+  'EMBEDDING_BASE_URL',
+  'EMBEDDING_DIM',
+  'GEMINI_API_KEY',
+  'JINA_API_KEY',
+  'OPENAI_API_KEY',
   // Rerank providers
-  'RERANK_PROVIDER', 'RERANK_API_KEY', 'RERANK_MODEL', 'RERANK_ENDPOINT',
-  'SILICONFLOW_API_KEY', 'VOYAGE_API_KEY', 'PINECONE_API_KEY',
+  'RERANK_PROVIDER',
+  'RERANK_API_KEY',
+  'RERANK_MODEL',
+  'RERANK_ENDPOINT',
+  'SILICONFLOW_API_KEY',
+  'VOYAGE_API_KEY',
+  'PINECONE_API_KEY',
 ];
 const toolSecrets = readEnvFile(TOOL_SECRET_KEYS);
 
@@ -315,7 +327,10 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const { args: containerArgs, envFilePath } = buildContainerArgs(mounts, containerName);
+  const { args: containerArgs, envFilePath } = buildContainerArgs(
+    mounts,
+    containerName,
+  );
 
   logger.debug(
     {
@@ -473,7 +488,9 @@ export async function runContainerAgent(
       clearTimeout(timeout);
       // Clean up temp env-file now that the container has exited
       if (envFilePath) {
-        try { fs.unlinkSync(envFilePath); } catch {}
+        try {
+          fs.unlinkSync(envFilePath);
+        } catch {}
       }
       const duration = Date.now() - startTime;
 
@@ -671,7 +688,9 @@ export async function runContainerAgent(
     container.on('error', (err) => {
       clearTimeout(timeout);
       if (envFilePath) {
-        try { fs.unlinkSync(envFilePath); } catch {}
+        try {
+          fs.unlinkSync(envFilePath);
+        } catch {}
       }
       logger.error(
         { group: group.name, containerName, error: err },
