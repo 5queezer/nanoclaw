@@ -284,14 +284,20 @@ export async function memoryCount(): Promise<number> {
 type ProCategory = 'preference' | 'fact' | 'decision' | 'entity' | 'other' | 'reflection';
 
 function normalizeCategory(cat: string): ProCategory {
-  const map: Record<string, ProCategory> = {
+  const direct: Record<string, ProCategory> = {
     preference: 'preference',
     decision:   'decision',
     entity:     'entity',
     fact:       'fact',
     reflection: 'reflection',
-    event:      'other',
-    general:    'other',
+    other:      'other',
   };
-  return map[cat.toLowerCase()] ?? 'other';
+  // Map legacy category names to the closest pro category so
+  // category-filtered searches still return results.
+  const aliases: Record<string, ProCategory> = {
+    event:   'fact',
+    general: 'other',
+  };
+  const lower = cat.toLowerCase();
+  return direct[lower] ?? aliases[lower] ?? 'other';
 }

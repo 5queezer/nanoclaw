@@ -761,12 +761,7 @@ export class MemoryRetriever {
     let liveIds: Set<string> | null = null;
     if (bm25OnlyIds.length > 0) {
       try {
-        const escapedIds = bm25OnlyIds.map(id => `'${id.replace(/'/g, "''")}'`).join(', ');
-        const rows = await (this.store as any).table?.query()
-          .where(`id IN (${escapedIds})`)
-          .select(['id'])
-          .toArray() ?? [];
-        liveIds = new Set(rows.map((r: any) => r.id as string));
+        liveIds = await this.store.filterExistingIds(bm25OnlyIds);
       } catch {
         // fail-open: keep all results if the check itself errors
       }
@@ -908,7 +903,9 @@ export class MemoryRetriever {
         if (error instanceof Error && error.name === "AbortError") {
           console.warn("Rerank API timed out (5s), falling back to cosine");
         } else {
-          console.warn("Rerank API failed, falling back to cosine:", error);
+          // Log only the error message, not the full error object (may contain API keys in headers)
+          const msg = error instanceof Error ? error.message : "unknown error";
+          console.warn(`Rerank API failed, falling back to cosine: ${msg}`);
         }
       }
     }

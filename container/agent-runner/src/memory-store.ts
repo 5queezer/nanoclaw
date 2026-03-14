@@ -617,7 +617,9 @@ export class MemoryStore {
       query = query.where(conditions.join(" AND "));
     }
 
-    // Fetch all matching rows (no pre-limit) so app-layer sort is correct across full dataset
+    // Over-fetch to allow app-layer sorting, but cap to avoid loading entire table.
+    // LanceDB doesn't support ORDER BY, so we fetch offset+limit rows and sort locally.
+    const fetchLimit = Math.min(offset + limit, 1000);
     const results = await query
       .select([
         "id",
@@ -628,6 +630,7 @@ export class MemoryStore {
         "timestamp",
         "metadata",
       ])
+      .limit(fetchLimit)
       .toArray();
 
     return results
@@ -708,9 +711,11 @@ export class MemoryStore {
     }
 
     let rows: any[];
+    const allColumns = ["id", "text", "vector", "category", "scope", "importance", "timestamp", "metadata"];
     if (isFullId) {
       const safeId = escapeSqlLiteral(id);
       rows = await this.table!.query()
+        .select(allColumns)
         .where(`id = '${safeId}'`)
         .limit(1)
         .toArray();
@@ -759,15 +764,17 @@ export class MemoryStore {
       category: updates.category ?? (row.category as MemoryEntry["category"]),
       scope: rowScope,
       importance: updates.importance ?? Number(row.importance),
-      timestamp: Number(row.timestamp), // preserve original
+      timestamp: Date.now(), // bump timestamp so updated entries benefit from recency boost
       metadata: updates.metadata ?? ((row.metadata as string) || "{}"),
     };
 
-    // LanceDB doesn't support in-place update; add new row first, then delete old.
-    // This order ensures the entry survives a crash between the two operations.
+    // LanceDB doesn't support in-place update; delete first, then add.
+    // delete-then-add avoids a window where both old and new rows are visible
+    // to parallel reads. If we crash between delete and add, data is lost for
+    // this entry — acceptable for a memory system vs. returning duplicates.
     const resolvedId = escapeSqlLiteral(row.id as string);
-    await this.table!.add([updated as unknown as Record<string, unknown>]);
     await this.table!.delete(`id = '${resolvedId}'`);
+    await this.table!.add([updated as unknown as Record<string, unknown>]);
 
     return updated;
   }
@@ -811,6 +818,21 @@ export class MemoryStore {
     }
 
     return deleteCount;
+  }
+
+  /**
+   * Check which IDs from a list actually exist in the table.
+   * Used by the retriever's ghost-check to validate BM25-only results.
+   */
+  async filterExistingIds(ids: string[]): Promise<Set<string>> {
+    await this.ensureInitialized();
+    if (ids.length === 0) return new Set();
+    const escapedIds = ids.map(id => `'${escapeSqlLiteral(id)}'`).join(', ');
+    const rows = await this.table!.query()
+      .where(`id IN (${escapedIds})`)
+      .select(['id'])
+      .toArray();
+    return new Set(rows.map((r: any) => r.id as string));
   }
 
   get hasFtsSupport(): boolean {

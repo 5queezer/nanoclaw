@@ -176,7 +176,9 @@ export function chunkDocument(text: string, config: ChunkerConfig = DEFAULT_CHUN
   const metadatas: ChunkMetadata[] = [];
 
   let pos = 0;
-  const maxGuard = Math.max(4, Math.ceil(text.length / Math.max(1, config.maxChunkSize - config.overlapSize)) + 5);
+  // Effective step per chunk = maxChunkSize - overlapSize, clamped to at least 1 char progress
+  const effectiveStep = Math.max(1, config.maxChunkSize - config.overlapSize);
+  const maxGuard = Math.max(4, Math.ceil(text.length / effectiveStep) + 5);
   let guard = 0;
 
   while (pos < text.length && guard < maxGuard) {
