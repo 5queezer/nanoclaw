@@ -116,20 +116,14 @@ export async function downloadFile(
  * Build the Telegram file download URL given a bot token and file_path
  * (as returned by the Telegram getFile API).
  */
-export function getTelegramFileUrl(
-  botToken: string,
-  filePath: string,
-): string {
+export function getTelegramFileUrl(botToken: string, filePath: string): string {
   return `https://api.telegram.org/file/bot${botToken}/${filePath}`;
 }
 
 /**
  * Determine a reasonable file extension from a Telegram file_path or MIME type.
  */
-export function getFileExtension(
-  filePath: string,
-  mimeType?: string,
-): string {
+export function getFileExtension(filePath: string, mimeType?: string): string {
   // Try to get extension from the Telegram-provided file path first
   const extFromPath = path.extname(filePath).toLowerCase();
   if (extFromPath && extFromPath.length > 1) {

@@ -34,14 +34,26 @@ import { RegisteredGroup } from './types.js';
 // Tool credentials (not Claude API secrets) — passed to containers for MCP tools
 const TOOL_SECRET_KEYS = [
   // LanceDB storage
-  'LANCEDB_URI', 'LANCEDB_API_KEY', 'MEMORY_LANCEDB_DIR',
+  'LANCEDB_URI',
+  'LANCEDB_API_KEY',
+  'MEMORY_LANCEDB_DIR',
   // Embedding providers
-  'EMBEDDING_PROVIDER', 'EMBEDDING_API_KEY', 'EMBEDDING_MODEL',
-  'EMBEDDING_BASE_URL', 'EMBEDDING_DIM',
-  'GEMINI_API_KEY', 'JINA_API_KEY', 'OPENAI_API_KEY',
+  'EMBEDDING_PROVIDER',
+  'EMBEDDING_API_KEY',
+  'EMBEDDING_MODEL',
+  'EMBEDDING_BASE_URL',
+  'EMBEDDING_DIM',
+  'GEMINI_API_KEY',
+  'JINA_API_KEY',
+  'OPENAI_API_KEY',
   // Rerank providers
-  'RERANK_PROVIDER', 'RERANK_API_KEY', 'RERANK_MODEL', 'RERANK_ENDPOINT',
-  'SILICONFLOW_API_KEY', 'VOYAGE_API_KEY', 'PINECONE_API_KEY',
+  'RERANK_PROVIDER',
+  'RERANK_API_KEY',
+  'RERANK_MODEL',
+  'RERANK_ENDPOINT',
+  'SILICONFLOW_API_KEY',
+  'VOYAGE_API_KEY',
+  'PINECONE_API_KEY',
 ];
 const toolSecrets = readEnvFile(TOOL_SECRET_KEYS);
 
@@ -278,7 +290,11 @@ function buildContainerArgs(
     fs.writeFileSync(envFilePath, envLines.join('\n'), { mode: 0o600 });
     args.push('--env-file', envFilePath);
     // Clean up after container starts (best-effort; file is 0600 so low risk)
-    setTimeout(() => { try { fs.unlinkSync(envFilePath); } catch {} }, 30_000);
+    setTimeout(() => {
+      try {
+        fs.unlinkSync(envFilePath);
+      } catch {}
+    }, 30_000);
   }
 
   // Runtime-specific args for host gateway resolution

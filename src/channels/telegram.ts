@@ -233,7 +233,15 @@ export class TelegramChannel implements Channel {
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
       const isGroup =
         ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-      return { chatJid, timestamp, senderName, sender, msgId, caption, isGroup };
+      return {
+        chatJid,
+        timestamp,
+        senderName,
+        sender,
+        msgId,
+        caption,
+        isGroup,
+      };
     };
 
     /**
@@ -246,8 +254,15 @@ export class TelegramChannel implements Channel {
       placeholder: string,
       mimeType?: string,
     ) => {
-      const { chatJid, timestamp, senderName, sender, msgId, caption, isGroup } =
-        buildBaseFields(ctx);
+      const {
+        chatJid,
+        timestamp,
+        senderName,
+        sender,
+        msgId,
+        caption,
+        isGroup,
+      } = buildBaseFields(ctx);
 
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
@@ -299,8 +314,15 @@ export class TelegramChannel implements Channel {
      * (stickers, location, contact).
      */
     const storeNonText = (ctx: any, placeholder: string) => {
-      const { chatJid, timestamp, senderName, sender, msgId, caption, isGroup } =
-        buildBaseFields(ctx);
+      const {
+        chatJid,
+        timestamp,
+        senderName,
+        sender,
+        msgId,
+        caption,
+        isGroup,
+      } = buildBaseFields(ctx);
 
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
@@ -326,7 +348,8 @@ export class TelegramChannel implements Channel {
     this.bot.on('message:photo', async (ctx) => {
       // Use the last (highest quality) photo size
       const photos: Array<{ file_id: string }> | undefined = ctx.message.photo;
-      const photo = photos && photos.length > 0 ? photos[photos.length - 1] : undefined;
+      const photo =
+        photos && photos.length > 0 ? photos[photos.length - 1] : undefined;
       if (photo?.file_id) {
         await storeWithDownload(ctx, photo.file_id, '[Photo]', 'image/jpeg');
       } else {
@@ -370,11 +393,13 @@ export class TelegramChannel implements Channel {
     });
 
     this.bot.on('message:document', async (ctx) => {
-      const doc: {
-        file_id: string;
-        file_name?: string;
-        mime_type?: string;
-      } | undefined = ctx.message.document;
+      const doc:
+        | {
+            file_id: string;
+            file_name?: string;
+            mime_type?: string;
+          }
+        | undefined = ctx.message.document;
       const name = doc?.file_name || 'file';
       if (doc?.file_id) {
         await storeWithDownload(
