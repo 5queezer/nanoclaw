@@ -249,12 +249,25 @@ export async function memoryStore(
   const embedder = getEmbedder();
   const vector = await embedder.embed(text);
 
+  // Build smart metadata (matching memory-lancedb-pro's buildSmartMetadata)
+  const baseMeta: Record<string, unknown> = {
+    l0_abstract: text,
+    l1_overview: `- ${text}`,
+    l2_content: text,
+    memory_category: category,
+    confidence: 1.0,
+    access_count: 0,
+    last_accessed_at: 0,
+    valid_from: Date.now(),
+    ...meta,
+  };
+
   const entry = await store.store({
     text,
     category: normalizeCategory(category),
     scope,
     importance,
-    metadata: JSON.stringify(meta),
+    metadata: JSON.stringify(baseMeta),
     vector,
   });
 
