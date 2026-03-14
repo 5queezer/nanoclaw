@@ -340,11 +340,11 @@ server.tool(
   'memory_store',
   `Store a memory for long-term semantic recall. Use this to remember important facts, decisions, preferences, and context that should persist across sessions.
 
-Categories: "preference", "decision", "entity", "event", "general"
+Categories: "preference", "decision", "entity", "fact", "reflection", "other"
 Importance: 0.0-1.0 (higher = more important to remember)`,
   {
     text: z.string().describe('The memory text to store (clear, self-contained statement)'),
-    category: z.enum(['preference', 'decision', 'entity', 'event', 'general']).default('general').describe('Memory category'),
+    category: z.enum(['preference', 'decision', 'entity', 'fact', 'reflection', 'other']).default('other').describe('Memory category'),
     importance: z.number().min(0).max(1).default(0.7).describe('How important this memory is (0.0-1.0)'),
   },
   async (args) => {
@@ -366,7 +366,7 @@ server.tool(
   {
     query: z.string().describe('What to search for (natural language)'),
     limit: z.number().min(1).max(20).default(5).describe('Max results to return'),
-    category: z.enum(['preference', 'decision', 'entity', 'event', 'general', 'fact', 'reflection', 'other']).optional().describe('Filter by category'),
+    category: z.enum(['preference', 'decision', 'entity', 'fact', 'reflection', 'other']).optional().describe('Filter by category'),
   },
   async (args) => {
     try {

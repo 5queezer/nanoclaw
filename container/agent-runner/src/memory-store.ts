@@ -257,9 +257,8 @@ export class MemoryStore {
       }
     }
 
-    // Detect FTS capability via runtime probe
+    // Detect FTS capability via runtime probe (reuse already-loaded module)
     try {
-      const lancedb = await loadLanceDB();
       this.ftsSupported = typeof (lancedb as any).Index?.fts === "function";
     } catch {
       this.ftsSupported = false;
@@ -511,9 +510,13 @@ export class MemoryStore {
         // LanceDB FTS _score is raw BM25 (unbounded). Normalize with sigmoid.
         // LanceDB may return BigInt for numeric columns; coerce safely.
         // Map: rawScore=0 → 0 (no match), rawScore>0 → sigmoid in (0.5, 1.0)
+        // The divisor (BM25_SIGMOID_SCALE=5) controls sigmoid spread: higher = more
+        // gradual mapping. At 5, a raw BM25 score of ~5 maps to ~0.73; a score of
+        // ~15 maps to ~0.95. This keeps typical BM25 scores in a useful 0.5–0.95 range.
+        const BM25_SIGMOID_SCALE = 5;
         const rawScore = row._score != null ? Number(row._score) : 0;
         const normalizedScore =
-          rawScore > 0 ? 1 / (1 + Math.exp(-rawScore / 5)) : 0;
+          rawScore > 0 ? 1 / (1 + Math.exp(-rawScore / BM25_SIGMOID_SCALE)) : 0;
 
         mapped.push({
           entry: {

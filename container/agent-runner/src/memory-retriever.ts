@@ -169,6 +169,7 @@ export const DEFAULT_RETRIEVAL_CONFIG: RetrievalConfig = {
   recencyHalfLifeDays: 14,
   recencyWeight: 0.1,
   filterNoise: true,
+  rerankProvider: undefined,
   rerankModel: "jina-reranker-v3",
   rerankEndpoint: "https://api.jina.ai/v1/rerank",
   lengthNormAnchor: 500,
@@ -932,7 +933,7 @@ export class MemoryRetriever {
       });
       return sorted;
     } catch (error) {
-      console.warn("Reranking failed, returning original results:", error);
+      console.warn("Reranking failed, returning original results:", error instanceof Error ? error.message : String(error));
       this.pushTrace(trace, "rerank", results.length, results.length, Date.now() - startedAt, {
         mode: "failed",
       });

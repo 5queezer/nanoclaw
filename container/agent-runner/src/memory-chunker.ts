@@ -84,14 +84,6 @@ function countLines(s: string): number {
   return s.split(/\r\n|\n|\r/).length;
 }
 
-function findLastIndexWithin(_text: string, re: RegExp, start: number, end: number): number {
-  // Find last match start index for regex within [start, end).
-  for (let i = end - 1; i >= start; i--) {
-    if (re.test(_text[i])) return i;
-  }
-  return -1;
-}
-
 function findSplitEnd(text: string, start: number, maxEnd: number, minEnd: number, config: ChunkerConfig): number {
   const safeMinEnd = clamp(minEnd, start + 1, maxEnd);
   const safeMaxEnd = clamp(maxEnd, safeMinEnd, text.length);
@@ -167,6 +159,11 @@ function sliceTrimWithIndices(text: string, start: number, end: number): { chunk
 export function chunkDocument(text: string, config: ChunkerConfig = DEFAULT_CHUNKER_CONFIG): ChunkResult {
   if (!text || text.trim().length === 0) {
     return { chunks: [], metadatas: [], totalOriginalLength: 0, chunkCount: 0 };
+  }
+
+  // Validate: overlapSize must be less than maxChunkSize to guarantee forward progress
+  if (config.overlapSize >= config.maxChunkSize) {
+    config = { ...config, overlapSize: Math.floor(config.maxChunkSize * 0.1) };
   }
 
   const totalOriginalLength = text.length;
