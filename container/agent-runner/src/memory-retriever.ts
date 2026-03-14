@@ -5,6 +5,7 @@
 
 import type { MemoryStore, MemorySearchResult } from "./memory-store.js";
 import type { Embedder } from "./memory-embedder.js";
+import { clampInt } from "./memory-utils.js";
 import { filterNoise } from "./memory-noise-filter.js";
 import { expandQuery } from "./memory-query-expander.js";
 import {
@@ -19,8 +20,6 @@ import {
 
 export interface RetrievalConfig {
   mode: "hybrid" | "vector";
-  vectorWeight: number;
-  bm25Weight: number;
   minScore: number;
   rerank: "cross-encoder" | "lightweight" | "none";
   candidatePoolSize: number;
@@ -161,8 +160,6 @@ export interface RetrievalTelemetrySnapshot {
 
 export const DEFAULT_RETRIEVAL_CONFIG: RetrievalConfig = {
   mode: "hybrid",
-  vectorWeight: 0.7,
-  bm25Weight: 0.3,
   minScore: 0.3,
   rerank: "cross-encoder",
   candidatePoolSize: 20,
@@ -182,11 +179,6 @@ export const DEFAULT_RETRIEVAL_CONFIG: RetrievalConfig = {
 // ============================================================================
 // Utility Functions
 // ============================================================================
-
-function clampInt(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min;
-  return Math.min(max, Math.max(min, Math.floor(value)));
-}
 
 function clamp01(value: number, fallback: number): number {
   if (!Number.isFinite(value)) return Number.isFinite(fallback) ? fallback : 0;
@@ -1019,9 +1011,9 @@ export class MemoryRetriever {
   /**
    * Length normalization: penalize long entries that dominate search results
    * via sheer keyword density and broad semantic coverage.
-   * Short, focused entries (< anchor) get a slight boost.
+   * Short, focused entries (< anchor) are unaffected.
    * Long, sprawling entries (> anchor) get penalized.
-   * Formula: score *= 1 / (1 + log2(charLen / anchor))
+   * Formula: score *= 1 / (1 + 0.5 * log2(max(charLen/anchor, 1)))
    */
   private applyLengthNormalization(
     results: RetrievalResult[],

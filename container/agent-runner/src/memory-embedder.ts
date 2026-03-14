@@ -34,7 +34,7 @@ class EmbeddingCache {
   }
 
   private key(text: string, task?: string): string {
-    const hash = createHash("sha256").update(`${task || ""}:${text}`).digest("hex").slice(0, 24);
+    const hash = createHash("sha256").update(`${task || ""}:${text}`).digest("hex");
     return hash;
   }
 

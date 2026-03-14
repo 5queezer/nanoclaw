@@ -71,10 +71,24 @@ async function main() {
   console.log(`Embedding model: ${EMBEDDING_MODEL}`);
   console.log(`Embedding endpoint: ${BASE_URL}`);
 
+  // Safety check: --overwrite flag required if table already exists
+  const overwrite = process.argv.includes('--overwrite');
+
   const connectOpts = lancedbDir.startsWith('db://') && process.env.LANCEDB_API_KEY
     ? { apiKey: process.env.LANCEDB_API_KEY }
     : undefined;
   const db = await lancedb.connect(lancedbDir, connectOpts);
+
+  // Check if table already exists
+  try {
+    const existingTables = await db.tableNames();
+    if (existingTables.includes('memories') && !overwrite) {
+      console.error('Error: "memories" table already exists. Use --overwrite to replace it.');
+      process.exit(1);
+    }
+  } catch {
+    // tableNames() may fail on fresh DBs — proceed
+  }
 
   // Stream lines to avoid loading entire file into memory
   const rl = createInterface({
@@ -89,7 +103,13 @@ async function main() {
   for await (const line of rl) {
     if (!line.trim()) continue;
     total++;
-    const entry = JSON.parse(line);
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch (e) {
+      console.warn(`Skipping malformed line ${total + 1}: ${e.message}`);
+      continue;
+    }
     console.log(`[${total}] Embedding: ${entry.text.slice(0, 60)}...`);
 
     const vector = await getEmbedding(entry.text);

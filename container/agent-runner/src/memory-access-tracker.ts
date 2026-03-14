@@ -74,6 +74,7 @@ export function computeEffectiveHalfLife(
  */
 export class AccessTracker {
   private accessLog = new Map<string, { count: number; lastAt: number }>();
+  private static readonly MAX_TRACKED = 10_000;
 
   /**
    * Seed the tracker from persisted metadata (call once per entry on load).
@@ -94,6 +95,19 @@ export class AccessTracker {
         count: (existing?.count ?? 0) + 1,
         lastAt: now,
       });
+    }
+
+    // Evict oldest entries if map exceeds max size
+    if (this.accessLog.size > AccessTracker.MAX_TRACKED) {
+      let oldest: string | null = null;
+      let oldestTime = Infinity;
+      for (const [id, info] of this.accessLog) {
+        if (info.lastAt < oldestTime) {
+          oldestTime = info.lastAt;
+          oldest = id;
+        }
+      }
+      if (oldest) this.accessLog.delete(oldest);
     }
   }
 

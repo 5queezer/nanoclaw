@@ -3,6 +3,7 @@
  */
 
 import type * as LanceDB from "@lancedb/lancedb";
+import { clampInt } from "./memory-utils.js";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -68,9 +69,12 @@ export const loadLanceDB = async (): Promise<
 // Utility Functions
 // ============================================================================
 
-function clampInt(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min;
-  return Math.min(max, Math.max(min, Math.floor(value)));
+const SCOPE_PATTERN = /^[a-zA-Z0-9_.:-]+$/;
+function validateScope(scope: string): string {
+  if (!SCOPE_PATTERN.test(scope)) {
+    throw new Error(`Invalid scope value: '${scope}'. Scope must match ${SCOPE_PATTERN}`);
+  }
+  return scope;
 }
 
 function escapeSqlLiteral(value: string): string {
@@ -424,7 +428,7 @@ export class MemoryStore {
     // Apply scope filter if provided
     if (scopeFilter && scopeFilter.length > 0) {
       const scopeConditions = scopeFilter
-        .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
+        .map((scope) => `scope = '${escapeSqlLiteral(validateScope(scope))}'`)
         .join(" OR ");
       query = query.where(`(${scopeConditions}) OR scope IS NULL`); // NULL for backward compatibility
     }
@@ -489,7 +493,7 @@ export class MemoryStore {
       // Apply scope filter if provided
       if (scopeFilter && scopeFilter.length > 0) {
         const scopeConditions = scopeFilter
-          .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
+          .map((scope) => `scope = '${escapeSqlLiteral(validateScope(scope))}'`)
           .join(" OR ");
         searchQuery = searchQuery.where(
           `(${scopeConditions}) OR scope IS NULL`,
@@ -563,7 +567,7 @@ export class MemoryStore {
     let scopeWhere = '';
     if (scopeFilter && scopeFilter.length > 0) {
       const scopeConditions = scopeFilter
-        .map((s) => `scope = '${escapeSqlLiteral(s)}'`)
+        .map((s) => `scope = '${escapeSqlLiteral(validateScope(s))}'`)
         .join(" OR ");
       scopeWhere = `((${scopeConditions}) OR scope IS NULL)`;
     }
@@ -619,7 +623,7 @@ export class MemoryStore {
 
     if (scopeFilter && scopeFilter.length > 0) {
       const scopeConditions = scopeFilter
-        .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
+        .map((scope) => `scope = '${escapeSqlLiteral(validateScope(scope))}'`)
         .join(" OR ");
       conditions.push(`((${scopeConditions}) OR scope IS NULL)`);
     }
@@ -676,14 +680,26 @@ export class MemoryStore {
 
     if (scopeFilter && scopeFilter.length > 0) {
       const scopeConditions = scopeFilter
-        .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
+        .map((scope) => `scope = '${escapeSqlLiteral(validateScope(scope))}'`)
         .join(" OR ");
       query = query.where(`((${scopeConditions}) OR scope IS NULL)`);
     }
 
-    // Cap at 10k to avoid OOM on very large tables. For exact counts beyond
-    // this, callers should use countRows() or a dedicated aggregation.
+    // Scope/category breakdowns are capped at 10K rows for OOM safety;
+    // if the table exceeds 10K rows, breakdowns will be approximate.
     const results = await query.select(["scope", "category"]).limit(10_000).toArray();
+
+    // For unfiltered queries, use countRows() to get the exact total even
+    // beyond the 10K cap. For filtered queries, results.length is our best
+    // approximation (countRows() doesn't accept filters).
+    let totalCount = results.length;
+    if (!scopeFilter || scopeFilter.length === 0) {
+      try {
+        if (this.table && typeof (this.table as any).countRows === 'function') {
+          totalCount = await (this.table as any).countRows();
+        }
+      } catch { /* fallback to results.length */ }
+    }
 
     const scopeCounts: Record<string, number> = {};
     const categoryCounts: Record<string, number> = {};
@@ -697,7 +713,7 @@ export class MemoryStore {
     }
 
     return {
-      totalCount: results.length,
+      totalCount,
       scopeCounts,
       categoryCounts,
     };
@@ -733,7 +749,7 @@ export class MemoryStore {
     let scopeWhere = '';
     if (scopeFilter && scopeFilter.length > 0) {
       const scopeConditions = scopeFilter
-        .map((s) => `scope = '${escapeSqlLiteral(s)}'`)
+        .map((s) => `scope = '${escapeSqlLiteral(validateScope(s))}'`)
         .join(" OR ");
       scopeWhere = `((${scopeConditions}) OR scope IS NULL)`;
     }
@@ -804,9 +820,9 @@ export class MemoryStore {
 
     if (scopeFilter.length > 0) {
       const scopeConditions = scopeFilter
-        .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
+        .map((scope) => `scope = '${escapeSqlLiteral(validateScope(scope))}'`)
         .join(" OR ");
-      conditions.push(`(${scopeConditions})`);
+      conditions.push(`(${scopeConditions} OR scope IS NULL)`);
     }
 
     if (beforeTimestamp !== undefined) {

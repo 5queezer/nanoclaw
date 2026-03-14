@@ -191,17 +191,6 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Gmail credentials directory (for Gmail MCP inside the container)
-  const homeDir = os.homedir();
-  const gmailDir = path.join(homeDir, '.gmail-mcp');
-  if (fs.existsSync(gmailDir)) {
-    mounts.push({
-      hostPath: gmailDir,
-      containerPath: '/home/node/.gmail-mcp',
-      readonly: false, // MCP may need to refresh OAuth tokens
-    });
-  }
-
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -251,10 +240,16 @@ function buildVolumeMounts(
   return mounts;
 }
 
+interface ContainerArgsResult {
+  args: string[];
+  /** Temp env-file path to clean up after the container exits (if any). */
+  envFilePath?: string;
+}
+
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
-): string[] {
+): ContainerArgsResult {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
@@ -285,16 +280,11 @@ function buildContainerArgs(
       envLines.push(`${key}=${toolSecrets[key]}`);
     }
   }
+  let envFilePath: string | undefined;
   if (envLines.length > 0) {
-    const envFilePath = path.join(os.tmpdir(), `.nanoclaw-env-${Date.now()}`);
+    envFilePath = path.join(os.tmpdir(), `.nanoclaw-env-${Date.now()}`);
     fs.writeFileSync(envFilePath, envLines.join('\n'), { mode: 0o600 });
     args.push('--env-file', envFilePath);
-    // Clean up after container starts (best-effort; file is 0600 so low risk)
-    setTimeout(() => {
-      try {
-        fs.unlinkSync(envFilePath);
-      } catch {}
-    }, 30_000);
   }
 
   // Runtime-specific args for host gateway resolution
@@ -320,7 +310,7 @@ function buildContainerArgs(
 
   args.push(CONTAINER_IMAGE);
 
-  return args;
+  return { args, envFilePath };
 }
 
 export async function runContainerAgent(
@@ -337,7 +327,10 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const { args: containerArgs, envFilePath } = buildContainerArgs(
+    mounts,
+    containerName,
+  );
 
   logger.debug(
     {
@@ -493,6 +486,12 @@ export async function runContainerAgent(
 
     container.on('close', (code) => {
       clearTimeout(timeout);
+      // Clean up temp env-file now that the container has exited
+      if (envFilePath) {
+        try {
+          fs.unlinkSync(envFilePath);
+        } catch {}
+      }
       const duration = Date.now() - startTime;
 
       if (timedOut) {
@@ -688,6 +687,11 @@ export async function runContainerAgent(
 
     container.on('error', (err) => {
       clearTimeout(timeout);
+      if (envFilePath) {
+        try {
+          fs.unlinkSync(envFilePath);
+        } catch {}
+      }
       logger.error(
         { group: group.name, containerName, error: err },
         'Container spawn error',

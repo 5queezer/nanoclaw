@@ -188,13 +188,21 @@ function resolveRetrievalConfig(): Partial<RetrievalConfig> {
 
 // ── Singletons ───────────────────────────────────────────────────────────────
 
+let _embeddingConfig: ReturnType<typeof resolveEmbeddingConfig> | null = null;
 let _store: MemoryStore | null = null;
 let _embedder: Embedder | null = null;
 let _retriever: MemoryRetriever | null = null;
 
+function getEmbeddingConfig() {
+  if (!_embeddingConfig) {
+    _embeddingConfig = resolveEmbeddingConfig();
+  }
+  return _embeddingConfig;
+}
+
 function getStore(): MemoryStore {
-  const embeddingConfig = resolveEmbeddingConfig();
   if (!_store) {
+    const embeddingConfig = getEmbeddingConfig();
     const vectorDim = embeddingConfig.dimensions || 0;
     if (!vectorDim) {
       throw new Error(
@@ -212,7 +220,7 @@ function getStore(): MemoryStore {
 
 function getEmbedder(): Embedder {
   if (!_embedder) {
-    _embedder = new Embedder(resolveEmbeddingConfig());
+    _embedder = new Embedder(getEmbeddingConfig());
   }
   return _embedder;
 }
@@ -235,6 +243,7 @@ export async function memoryStore(
   category: string = 'general',
   importance: number = 0.7,
   meta: Record<string, unknown> = {},
+  scope: string = 'global',
 ): Promise<string> {
   const store = getStore();
   const embedder = getEmbedder();
@@ -243,7 +252,7 @@ export async function memoryStore(
   const entry = await store.store({
     text,
     category: normalizeCategory(category),
-    scope: 'global',
+    scope,
     importance,
     metadata: JSON.stringify(meta),
     vector,
@@ -256,6 +265,7 @@ export async function memorySearch(
   query: string,
   limit: number = 5,
   category?: string,
+  scope: string | string[] = 'global',
 ): Promise<Array<{
   id: string;
   text: string;
@@ -270,7 +280,7 @@ export async function memorySearch(
   const results = await retriever.retrieve({
     query,
     limit,
-    scopeFilter: ['global'],
+    scopeFilter: Array.isArray(scope) ? scope : [scope],
     ...(category ? { category: normalizeCategory(category) } : {}),
     source: 'manual',
   });
@@ -282,19 +292,19 @@ export async function memorySearch(
     importance: r.entry.importance,
     timestamp:  r.entry.timestamp,
     metadata:   r.entry.metadata ?? '{}',
-    _distance:  1 - r.score,
+    _distance:  r.score > 0 ? (1 - r.score) / r.score : Infinity,
   }));
 }
 
-export async function memoryDelete(id: string): Promise<void> {
+export async function memoryDelete(id: string, scope?: string): Promise<void> {
   const store = getStore();
   const uuid = id.startsWith('mem-') ? id.slice(4) : id;
-  await store.delete(uuid);
+  await store.delete(uuid, scope ? [scope] : undefined);
 }
 
-export async function memoryCount(): Promise<number> {
+export async function memoryCount(scope?: string): Promise<number> {
   const store = getStore();
-  const stats = await store.stats();
+  const stats = await store.stats(scope ? [scope] : undefined);
   return stats.totalCount;
 }
 

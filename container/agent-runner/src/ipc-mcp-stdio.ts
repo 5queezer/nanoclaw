@@ -346,10 +346,11 @@ Importance: 0.0-1.0 (higher = more important to remember)`,
     text: z.string().describe('The memory text to store (clear, self-contained statement)'),
     category: z.enum(['preference', 'decision', 'entity', 'fact', 'reflection', 'other']).default('other').describe('Memory category'),
     importance: z.number().min(0).max(1).default(0.7).describe('How important this memory is (0.0-1.0)'),
+    scope: z.string().default('global').describe('Scope for memory isolation (e.g. group ID or topic). Defaults to "global".'),
   },
   async (args) => {
     try {
-      const id = await memoryStore(args.text, args.category, args.importance);
+      const id = await memoryStore(args.text, args.category, args.importance, {}, args.scope);
       return { content: [{ type: 'text' as const, text: `Memory stored (${id}): "${args.text.slice(0, 80)}..."` }] };
     } catch (err) {
       return {
@@ -367,10 +368,11 @@ server.tool(
     query: z.string().describe('What to search for (natural language)'),
     limit: z.number().min(1).max(20).default(5).describe('Max results to return'),
     category: z.enum(['preference', 'decision', 'entity', 'fact', 'reflection', 'other']).optional().describe('Filter by category'),
+    scope: z.union([z.string(), z.array(z.string())]).default('global').describe('Scope filter for memory isolation. Pass a string or array of strings. Defaults to "global".'),
   },
   async (args) => {
     try {
-      const results = await memorySearch(args.query, args.limit, args.category);
+      const results = await memorySearch(args.query, args.limit, args.category, args.scope);
       if (results.length === 0) {
         return { content: [{ type: 'text' as const, text: 'No memories found.' }] };
       }
@@ -395,10 +397,13 @@ server.tool(
 server.tool(
   'memory_delete',
   'Delete a specific memory by ID.',
-  { id: z.string().describe('The memory ID to delete') },
+  {
+    id: z.string().describe('The memory ID to delete'),
+    scope: z.string().optional().describe('Scope to verify ownership. If provided, deletion fails if the memory belongs to a different scope.'),
+  },
   async (args) => {
     try {
-      await memoryDelete(args.id);
+      await memoryDelete(args.id, args.scope);
       return { content: [{ type: 'text' as const, text: `Memory ${args.id} deleted.` }] };
     } catch (err) {
       return {
@@ -412,10 +417,12 @@ server.tool(
 server.tool(
   'memory_count',
   'Get the total number of stored memories.',
-  {},
-  async () => {
+  {
+    scope: z.string().optional().describe('Optional scope filter. If provided, counts only memories in this scope.'),
+  },
+  async (args) => {
     try {
-      const count = await memoryCount();
+      const count = await memoryCount(args.scope);
       return { content: [{ type: 'text' as const, text: `Total memories: ${count}` }] };
     } catch (err) {
       return {
