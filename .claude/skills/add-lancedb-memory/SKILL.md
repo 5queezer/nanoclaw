@@ -25,6 +25,8 @@ Set `EMBEDDING_PROVIDER` in `.env` (default: `gemini`):
 | `ollama` | nomic-embed-text | 768 | — (local) |
 | `custom` | (set `EMBEDDING_MODEL`) | (set `EMBEDDING_DIM`) | `EMBEDDING_API_KEY` |
 
+> **Note:** When using Ollama, set `EMBEDDING_DIM` explicitly if you change the model — dimensions vary by model and there is no auto-detection.
+
 Override any default with `EMBEDDING_MODEL`, `EMBEDDING_BASE_URL`, `EMBEDDING_DIM`, `EMBEDDING_API_KEY`.
 
 ## Rerank Providers (optional)
@@ -37,12 +39,12 @@ Set `RERANK_PROVIDER` in `.env` to enable cross-encoder reranking:
 | `siliconflow` | BAAI/bge-reranker-v2-m3 | `SILICONFLOW_API_KEY` |
 | `voyage` | rerank-2.5 | `VOYAGE_API_KEY` |
 | `pinecone` | bge-reranker-v2-m3 | `PINECONE_API_KEY` |
-| `vllm` | BAAI/bge-reranker-v2-m3 | — (local) |
+| `vllm` | BAAI/bge-reranker-v2-m3 | — (local, default endpoint: `http://localhost:8000/v1/rerank`) |
 | `none` | — | — |
 
-Override with `RERANK_MODEL`, `RERANK_ENDPOINT`, `RERANK_API_KEY`.
+Reranking is **disabled by default** (`RERANK_PROVIDER` is unset). Without a rerank provider, the system falls back to lightweight cosine similarity ranking.
 
-Without a rerank provider, the system falls back to lightweight cosine similarity reranking.
+Override with `RERANK_MODEL`, `RERANK_ENDPOINT`, `RERANK_API_KEY`.
 
 ## Phase 1: Pre-flight
 
@@ -53,6 +55,8 @@ Check if `container/agent-runner/src/memory-store.ts` exists. If it does, skip t
 ### Check prerequisites
 
 An embedding API key is required (unless using Ollama). Ask the user which provider they prefer and whether they have an API key.
+
+AskUserQuestion: Which embedding provider would you like to use? (gemini, jina, openai, ollama, or custom) Do you have an API key, or do you need to get one?
 
 For Gemini (default, free tier):
 > Get a free Gemini API key at https://aistudio.google.com/apikey — 1,500 requests/day for embedding.
@@ -75,7 +79,11 @@ git remote add upstream https://github.com/qwibitai/nanoclaw.git
 
 ```bash
 git fetch upstream feat/memory-lancedb-pro
-git merge upstream/feat/memory-lancedb-pro
+git merge upstream/feat/memory-lancedb-pro || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
 ```
 
 This merges in:
@@ -96,11 +104,12 @@ If the merge reports conflicts, resolve them by reading the conflicted files and
 ### Validate code changes
 
 ```bash
+npm install
 npm run build
 ./container/build.sh
 ```
 
-Build must be clean before proceeding.
+All builds must be clean before proceeding.
 
 ## Phase 3: Configure
 
@@ -133,7 +142,7 @@ JINA_API_KEY=your-jina-api-key-here  # shared with embedding if using Jina for b
 
 ### LanceDB Cloud (optional)
 
-By default, memories are stored locally in each group's workspace at `/workspace/group/memory/lancedb`. For cloud storage, add:
+By default, memories are stored locally in each group's workspace at `/workspace/group/memory/lancedb`. To override the local path, set `MEMORY_LANCEDB_DIR`. For cloud storage, add:
 
 ```bash
 LANCEDB_URI=db://your-database
