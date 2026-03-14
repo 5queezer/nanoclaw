@@ -80,7 +80,7 @@ async function main() {
       importance: entry.importance || 0.7,
       timestamp: entry.timestamp || Date.now(),
       metadata: typeof entry.metadata === 'string' ? entry.metadata : JSON.stringify(entry.metadata || {}),
-      vector: new Float32Array(vector),
+      vector: Array.from(vector),
     });
 
     // Rate limit: ~1 req/sec to be safe

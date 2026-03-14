@@ -1,101 +1,64 @@
 /**
- * Semantic memory powered by LanceDB + Gemini embeddings.
+ * Semantic memory powered by memory-lancedb-pro.
+ * Hybrid retrieval: vector + BM25, cross-encoder reranking, recency boost.
  * Supports local (default) or cloud via LANCEDB_URI + LANCEDB_API_KEY.
  */
 
-import * as lancedb from '@lancedb/lancedb';
-import {
-  Field,
-  FixedSizeList,
-  Float32,
-  Float64,
-  Schema,
-  Utf8,
-} from 'apache-arrow';
-import { randomUUID } from 'crypto';
+import { MemoryStore } from './memory-store.js';
+import { MemoryRetriever } from './memory-retriever.js';
+import { Embedder } from './memory-embedder.js';
 
-const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'gemini-embedding-001';
-const EMBEDDING_DIM = parseInt(process.env.EMBEDDING_DIM || '3072', 10);
-const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+// ── Config ────────────────────────────────────────────────────────────────────
 
-// Cloud: LANCEDB_URI=db://my-db + LANCEDB_API_KEY
-// Local: falls back to group workspace (configurable via MEMORY_LANCEDB_DIR)
-const LANCEDB_URI = process.env.LANCEDB_URI || '';
+const LANCEDB_URI     = process.env.LANCEDB_URI     || '';
 const LANCEDB_API_KEY = process.env.LANCEDB_API_KEY || '';
-const LOCAL_LANCEDB_DIR =
-  process.env.MEMORY_LANCEDB_DIR || '/workspace/group/memory/lancedb';
+const LOCAL_DB_DIR    = process.env.MEMORY_LANCEDB_DIR || '/workspace/group/memory/lancedb';
 
-let db: lancedb.Connection | null = null;
-let tablePromise: Promise<lancedb.Table> | null = null;
+const GEMINI_API_KEY  = process.env.GEMINI_API_KEY  || '';
+const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'gemini-embedding-001';
+const EMBEDDING_DIM   = parseInt(process.env.EMBEDDING_DIM || '3072', 10);
 
-async function getEmbedding(text: string): Promise<number[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY not set');
+// Gemini exposes an OpenAI-compatible embeddings endpoint
+const GEMINI_OPENAI_BASE = 'https://generativelanguage.googleapis.com/v1beta/openai/';
 
-  const resp = await fetch(
-    `${GEMINI_BASE_URL}/models/${EMBEDDING_MODEL}:embedContent`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        model: `models/${EMBEDDING_MODEL}`,
-        content: { parts: [{ text }] },
-      }),
-      signal: AbortSignal.timeout(30_000),
-    },
-  );
+// ── Singletons ────────────────────────────────────────────────────────────────
 
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`Gemini embedding failed (${resp.status}): ${err}`);
-  }
+let _store: MemoryStore | null = null;
+let _embedder: Embedder | null = null;
+let _retriever: MemoryRetriever | null = null;
 
-  const data = (await resp.json()) as { embedding: { values: number[] } };
-  return data.embedding.values;
-}
-
-const MEMORIES_SCHEMA = new Schema([
-  new Field('id', new Utf8()),
-  new Field('text', new Utf8()),
-  new Field('category', new Utf8()),
-  new Field('importance', new Float64()),
-  new Field('timestamp', new Float64()),
-  new Field('metadata', new Utf8()),
-  new Field(
-    'vector',
-    new FixedSizeList(EMBEDDING_DIM, new Field('item', new Float32())),
-  ),
-]);
-
-async function initTable(): Promise<lancedb.Table> {
-  if (LANCEDB_URI) {
-    db = await lancedb.connect(LANCEDB_URI, {
-      apiKey: LANCEDB_API_KEY || undefined,
-    });
-  } else {
-    db = await lancedb.connect(LOCAL_LANCEDB_DIR);
-  }
-
-  const tableNames = await db.tableNames();
-  if (tableNames.includes('memories')) {
-    return await db.openTable('memories');
-  } else {
-    return await db.createEmptyTable('memories', MEMORIES_SCHEMA);
-  }
-}
-
-function getTable(): Promise<lancedb.Table> {
-  if (!tablePromise) {
-    tablePromise = initTable().catch((err) => {
-      tablePromise = null;
-      throw err;
+function getStore(): MemoryStore {
+  if (!_store) {
+    _store = new MemoryStore({
+      dbPath:    LANCEDB_URI || LOCAL_DB_DIR,
+      vectorDim: EMBEDDING_DIM,
+      apiKey:    LANCEDB_URI ? (LANCEDB_API_KEY || undefined) : undefined,
     });
   }
-  return tablePromise;
+  return _store;
 }
+
+function getEmbedder(): Embedder {
+  if (!_embedder) {
+    _embedder = new Embedder({
+      provider:   'openai-compatible',
+      apiKey:     GEMINI_API_KEY,
+      baseURL:    GEMINI_OPENAI_BASE,
+      model:      EMBEDDING_MODEL,
+      dimensions: EMBEDDING_DIM,
+    });
+  }
+  return _embedder;
+}
+
+function getRetriever(): MemoryRetriever {
+  if (!_retriever) {
+    _retriever = new MemoryRetriever(getStore(), getEmbedder());
+  }
+  return _retriever;
+}
+
+// ── Public API (drop-in replacement for basic memory.ts) ─────────────────────
 
 export async function memoryStore(
   text: string,
@@ -103,68 +66,82 @@ export async function memoryStore(
   importance: number = 0.7,
   meta: Record<string, unknown> = {},
 ): Promise<string> {
-  const tbl = await getTable();
-  const vector = await getEmbedding(text);
-  const id = `mem-${randomUUID()}`;
+  const store = getStore();
+  const embedder = getEmbedder();
+  const vector = await embedder.embed(text);
 
-  await tbl.add([
-    {
-      id,
-      text,
-      category,
-      importance,
-      timestamp: Date.now(),
-      metadata: JSON.stringify(meta),
-      vector,
-    },
-  ]);
+  const entry = await store.store({
+    text,
+    category: normalizeCategory(category),
+    scope: 'global',
+    importance,
+    metadata: JSON.stringify(meta),
+    vector,
+  });
 
-  return id;
+  return entry.id;
 }
 
 export async function memorySearch(
   query: string,
   limit: number = 5,
   category?: string,
-): Promise<
-  Array<{
-    id: string;
-    text: string;
-    category: string;
-    importance: number;
-    timestamp: number;
-    metadata: string;
-    _distance: number;
-  }>
-> {
-  const tbl = await getTable();
-  const vector = await getEmbedding(query);
+): Promise<Array<{
+  id: string;
+  text: string;
+  category: string;
+  importance: number;
+  timestamp: number;
+  metadata: string;
+  _distance: number;
+}>> {
+  const retriever = getRetriever();
 
-  let search = tbl.search(new Float32Array(vector)).limit(limit);
-  if (category) {
-    const safe = category.replace(/[^a-z_]/gi, '');
-    search = search.where(`category = '${safe}'`);
-  }
+  const results = await retriever.retrieve({
+    query,
+    limit,
+    scopeFilter: ['global'],
+    ...(category ? { category: normalizeCategory(category) } : {}),
+    source: 'manual',
+  });
 
-  const results = await search.toArray();
-  return results.map((r: Record<string, unknown>) => ({
-    id: r.id as string,
-    text: r.text as string,
-    category: r.category as string,
-    importance: r.importance as number,
-    timestamp: r.timestamp as number,
-    metadata: r.metadata as string,
-    _distance: r._distance as number,
+  return results.map(r => ({
+    id:         r.entry.id,
+    text:       r.entry.text,
+    category:   r.entry.category,
+    importance: r.entry.importance,
+    timestamp:  r.entry.timestamp,
+    metadata:   r.entry.metadata ?? '{}',
+    _distance:  1 - r.score,
   }));
 }
 
 export async function memoryDelete(id: string): Promise<void> {
-  const tbl = await getTable();
-  const safe = id.replace(/[^a-z0-9_-]/gi, '');
-  await tbl.delete(`id = '${safe}'`);
+  const store = getStore();
+  // store.delete() validates UUID format — strip the "mem-" prefix if present
+  const uuid = id.startsWith('mem-') ? id.slice(4) : id;
+  await store.delete(uuid);
 }
 
 export async function memoryCount(): Promise<number> {
-  const tbl = await getTable();
-  return await tbl.countRows();
+  const store = getStore();
+  const stats = await store.stats();
+  return stats.totalCount;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+type ProCategory = 'preference' | 'fact' | 'decision' | 'entity' | 'other' | 'reflection';
+
+function normalizeCategory(cat: string): ProCategory {
+  const map: Record<string, ProCategory> = {
+    preference: 'preference',
+    decision:   'decision',
+    entity:     'entity',
+    fact:       'fact',
+    reflection: 'reflection',
+    event:      'other',
+    general:    'other',
+  };
+  return map[cat.toLowerCase()] ?? 'other';
 }
