@@ -54,6 +54,11 @@ const TOOL_SECRET_KEYS = [
   'SILICONFLOW_API_KEY',
   'VOYAGE_API_KEY',
   'PINECONE_API_KEY',
+  // Extraction LLM (smart memory extraction)
+  'EXTRACTION_PROVIDER',
+  'EXTRACTION_API_KEY',
+  'EXTRACTION_MODEL',
+  'EXTRACTION_BASE_URL',
 ];
 const toolSecrets = readEnvFile(TOOL_SECRET_KEYS);
 
