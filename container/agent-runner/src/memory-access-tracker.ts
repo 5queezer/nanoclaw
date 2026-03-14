@@ -102,10 +102,10 @@ export class AccessTracker {
   }
 
   /**
-   * Return IDs that have been accessed since last flush (for persistence).
-   * Resets the dirty set after returning.
+   * Return all tracked IDs (for persistence).
+   * Caller should write access metadata back to the store for these entries.
    */
-  getDirtyIds(): string[] {
+  getTrackedIds(): string[] {
     return Array.from(this.accessLog.keys());
   }
 }

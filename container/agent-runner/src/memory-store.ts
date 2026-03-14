@@ -74,7 +74,7 @@ function clampInt(value: number, min: number, max: number): number {
 }
 
 function escapeSqlLiteral(value: string): string {
-  return value.replace(/'/g, "''");
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "''");
 }
 
 // ============================================================================
@@ -510,9 +510,10 @@ export class MemoryStore {
 
         // LanceDB FTS _score is raw BM25 (unbounded). Normalize with sigmoid.
         // LanceDB may return BigInt for numeric columns; coerce safely.
+        // Map: rawScore=0 → 0 (no match), rawScore>0 → sigmoid in (0.5, 1.0)
         const rawScore = row._score != null ? Number(row._score) : 0;
         const normalizedScore =
-          rawScore > 0 ? 1 / (1 + Math.exp(-rawScore / 5)) : 0.5;
+          rawScore > 0 ? 1 / (1 + Math.exp(-rawScore / 5)) : 0;
 
         mapped.push({
           entry: {
@@ -551,17 +552,24 @@ export class MemoryStore {
     }
 
     let candidates: any[];
+    // Build scope WHERE clause for DB-level filtering
+    let scopeWhere = '';
+    if (scopeFilter && scopeFilter.length > 0) {
+      const scopeConditions = scopeFilter
+        .map((s) => `scope = '${escapeSqlLiteral(s)}'`)
+        .join(" OR ");
+      scopeWhere = `((${scopeConditions}) OR scope IS NULL)`;
+    }
     if (isFullId) {
-      candidates = await this.table!.query()
-        .where(`id = '${escapeSqlLiteral(id)}'`)
-        .limit(1)
-        .toArray();
+      let q = this.table!.query()
+        .where(`id = '${escapeSqlLiteral(id)}'`);
+      if (scopeWhere) q = q.where(scopeWhere);
+      candidates = await q.limit(1).toArray();
     } else {
-      // Prefix match: fetch candidates and filter in app layer
-      const all = await this.table!.query()
-        .select(["id", "scope"])
-        .limit(1000)
-        .toArray();
+      // Prefix match: fetch candidates with scope filter at DB level
+      let q = this.table!.query().select(["id", "scope"]);
+      if (scopeWhere) q = q.where(scopeWhere);
+      const all = await q.limit(1000).toArray();
       candidates = all.filter((r: any) => (r.id as string).startsWith(id));
       if (candidates.length > 1) {
         throw new Error(
@@ -666,7 +674,9 @@ export class MemoryStore {
       query = query.where(`((${scopeConditions}) OR scope IS NULL)`);
     }
 
-    const results = await query.select(["scope", "category"]).toArray();
+    // Cap at 10k to avoid OOM on very large tables. For exact counts beyond
+    // this, callers should use countRows() or a dedicated aggregation.
+    const results = await query.select(["scope", "category"]).limit(10_000).toArray();
 
     const scopeCounts: Record<string, number> = {};
     const categoryCounts: Record<string, number> = {};
@@ -712,28 +722,26 @@ export class MemoryStore {
 
     let rows: any[];
     const allColumns = ["id", "text", "vector", "category", "scope", "importance", "timestamp", "metadata"];
+    // Build scope WHERE clause for DB-level filtering
+    let scopeWhere = '';
+    if (scopeFilter && scopeFilter.length > 0) {
+      const scopeConditions = scopeFilter
+        .map((s) => `scope = '${escapeSqlLiteral(s)}'`)
+        .join(" OR ");
+      scopeWhere = `((${scopeConditions}) OR scope IS NULL)`;
+    }
     if (isFullId) {
       const safeId = escapeSqlLiteral(id);
-      rows = await this.table!.query()
+      let q = this.table!.query()
         .select(allColumns)
-        .where(`id = '${safeId}'`)
-        .limit(1)
-        .toArray();
+        .where(`id = '${safeId}'`);
+      if (scopeWhere) q = q.where(scopeWhere);
+      rows = await q.limit(1).toArray();
     } else {
-      // Prefix match
-      const all = await this.table!.query()
-        .select([
-          "id",
-          "text",
-          "vector",
-          "category",
-          "scope",
-          "importance",
-          "timestamp",
-          "metadata",
-        ])
-        .limit(1000)
-        .toArray();
+      // Prefix match with scope filter at DB level
+      let q = this.table!.query().select(allColumns);
+      if (scopeWhere) q = q.where(scopeWhere);
+      const all = await q.limit(1000).toArray();
       rows = all.filter((r: any) => (r.id as string).startsWith(id));
       if (rows.length > 1) {
         throw new Error(
@@ -808,8 +816,8 @@ export class MemoryStore {
 
     const whereClause = conditions.join(" AND ");
 
-    // Count first
-    const countResults = await this.table!.query().where(whereClause).toArray();
+    // Count first (select only id to minimize memory)
+    const countResults = await this.table!.query().where(whereClause).select(["id"]).toArray();
     const deleteCount = countResults.length;
 
     // Then delete
