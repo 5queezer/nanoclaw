@@ -366,7 +366,7 @@ server.tool(
   {
     query: z.string().describe('What to search for (natural language)'),
     limit: z.number().min(1).max(20).default(5).describe('Max results to return'),
-    category: z.string().optional().describe('Filter by category (preference, decision, entity, event, general)'),
+    category: z.enum(['preference', 'decision', 'entity', 'event', 'general', 'fact', 'reflection', 'other']).optional().describe('Filter by category'),
   },
   async (args) => {
     try {
