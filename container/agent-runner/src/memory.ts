@@ -147,6 +147,19 @@ const RERANK_DEFAULTS: Record<string, RerankDefaults> = {
 function resolveRetrievalConfig(): Partial<RetrievalConfig> {
   const provider = RERANK_PROVIDER.toLowerCase();
   if (!provider || provider === 'none') {
+    // Hint: if a rerank-capable API key is present but RERANK_PROVIDER is unset
+    const hintKeys: Array<[string, string]> = [
+      ['JINA_API_KEY', 'jina'],
+      ['VOYAGE_API_KEY', 'voyage'],
+      ['PINECONE_API_KEY', 'pinecone'],
+      ['SILICONFLOW_API_KEY', 'siliconflow'],
+    ];
+    for (const [envKey, providerName] of hintKeys) {
+      if (process.env[envKey]) {
+        console.log(`[memory] Hint: ${envKey} is set but RERANK_PROVIDER is not — set RERANK_PROVIDER=${providerName} to enable cross-encoder reranking`);
+        break;
+      }
+    }
     return { rerank: 'none' };
   }
 
@@ -182,9 +195,15 @@ let _retriever: MemoryRetriever | null = null;
 function getStore(): MemoryStore {
   const embeddingConfig = resolveEmbeddingConfig();
   if (!_store) {
+    const vectorDim = embeddingConfig.dimensions || 0;
+    if (!vectorDim) {
+      throw new Error(
+        `Cannot determine embedding dimensions. Set EMBEDDING_DIM when using a custom provider.`,
+      );
+    }
     _store = new MemoryStore({
       dbPath:    LANCEDB_URI || LOCAL_DB_DIR,
-      vectorDim: embeddingConfig.dimensions || 0,
+      vectorDim,
       apiKey:    LANCEDB_URI ? (LANCEDB_API_KEY || undefined) : undefined,
     });
   }

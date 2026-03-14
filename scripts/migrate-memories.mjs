@@ -71,7 +71,10 @@ async function main() {
   console.log(`Embedding model: ${EMBEDDING_MODEL}`);
   console.log(`Embedding endpoint: ${BASE_URL}`);
 
-  const db = await lancedb.connect(lancedbDir);
+  const connectOpts = lancedbDir.startsWith('db://') && process.env.LANCEDB_API_KEY
+    ? { apiKey: process.env.LANCEDB_API_KEY }
+    : undefined;
+  const db = await lancedb.connect(lancedbDir, connectOpts);
 
   // Stream lines to avoid loading entire file into memory
   const rl = createInterface({

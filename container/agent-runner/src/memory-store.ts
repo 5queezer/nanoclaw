@@ -204,16 +204,20 @@ export class MemoryStore {
     try {
       table = await db.openTable(TABLE_NAME);
 
-      // Check if we need to add scope column for backward compatibility
+      // Check if existing data has scope column (backward compatibility)
       try {
         const sample = await table.query().limit(1).toArray();
         if (sample.length > 0 && !("scope" in sample[0])) {
-          console.warn(
-            "Adding scope column for backward compatibility with existing data",
+          throw new Error(
+            `Existing LanceDB table at "${this.config.dbPath}" uses old schema without "scope" column.\n` +
+            `  Fix: Re-embed your memories using: node scripts/migrate-memories.mjs <backup.jsonl> "${this.config.dbPath}"\n` +
+            `       Or delete the table directory and let it be recreated on first store.`,
           );
         }
-      } catch (err) {
-        console.warn("Could not check table schema:", err);
+      } catch (err: any) {
+        // Re-throw schema migration errors, only swallow probe failures
+        if (err?.message?.includes('old schema')) throw err;
+        console.warn("Could not check table schema:", err instanceof Error ? err.message : String(err));
       }
     } catch (_openErr) {
       // Table doesn't exist yet — create it
