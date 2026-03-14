@@ -1,11 +1,11 @@
 ---
 name: add-lancedb-memory
-description: Add semantic memory to container agents using LanceDB + Gemini embeddings. Agents get 4 MCP tools (memory_store, memory_search, memory_delete, memory_count) for persistent vector-based recall across sessions.
+description: Add semantic memory to container agents using LanceDB + configurable embeddings (Gemini, Jina, OpenAI, Ollama). Hybrid retrieval with BM25, cross-encoder reranking, and recency boost. Agents get 4 MCP tools (memory_store, memory_search, memory_delete, memory_count) for persistent vector-based recall across sessions.
 ---
 
-# Add Semantic Memory (LanceDB + Gemini)
+# Add Semantic Memory (LanceDB + Hybrid Retrieval)
 
-This skill adds persistent semantic memory to container agents via 4 MCP tools. Agents can store facts, decisions, and preferences, then retrieve them by semantic similarity across sessions.
+This skill adds persistent semantic memory to container agents via 4 MCP tools. Uses memory-lancedb-pro for hybrid retrieval (vector + BM25), cross-encoder reranking, recency boost, and noise filtering.
 
 Tools added:
 - `memory_store` — store a memory with category and importance
@@ -13,23 +13,49 @@ Tools added:
 - `memory_delete` — delete a memory by ID
 - `memory_count` — count total stored memories
 
-Uses LanceDB for vector storage and Gemini `embedding-001` for 3072-dimensional embeddings. Supports local storage (default) or LanceDB Cloud.
+## Embedding Providers
+
+Set `EMBEDDING_PROVIDER` in `.env` (default: `gemini`):
+
+| Provider | Model | Dimensions | API Key Env |
+|----------|-------|------------|-------------|
+| `gemini` (default) | gemini-embedding-001 | 3072 | `GEMINI_API_KEY` |
+| `jina` | jina-embeddings-v5-text-small | 1024 | `JINA_API_KEY` |
+| `openai` | text-embedding-3-small | 1536 | `OPENAI_API_KEY` |
+| `ollama` | nomic-embed-text | 768 | — (local) |
+| `custom` | (set `EMBEDDING_MODEL`) | (set `EMBEDDING_DIM`) | `EMBEDDING_API_KEY` |
+
+Override any default with `EMBEDDING_MODEL`, `EMBEDDING_BASE_URL`, `EMBEDDING_DIM`, `EMBEDDING_API_KEY`.
+
+## Rerank Providers (optional)
+
+Set `RERANK_PROVIDER` in `.env` to enable cross-encoder reranking:
+
+| Provider | Model | API Key Env |
+|----------|-------|-------------|
+| `jina` | jina-reranker-v3 | `JINA_API_KEY` |
+| `siliconflow` | BAAI/bge-reranker-v2-m3 | `SILICONFLOW_API_KEY` |
+| `voyage` | rerank-2.5 | `VOYAGE_API_KEY` |
+| `pinecone` | bge-reranker-v2-m3 | `PINECONE_API_KEY` |
+| `vllm` | BAAI/bge-reranker-v2-m3 | — (local) |
+| `none` | — | — |
+
+Override with `RERANK_MODEL`, `RERANK_ENDPOINT`, `RERANK_API_KEY`.
+
+Without a rerank provider, the system falls back to lightweight cosine similarity reranking.
 
 ## Phase 1: Pre-flight
 
 ### Check if already applied
 
-Check if `container/agent-runner/src/memory.ts` exists. If it does, skip to Phase 3 (Configure).
+Check if `container/agent-runner/src/memory-store.ts` exists. If it does, skip to Phase 3 (Configure).
 
 ### Check prerequisites
 
-A Gemini API key is required for embeddings. Ask the user:
+An embedding API key is required (unless using Ollama). Ask the user which provider they prefer and whether they have an API key.
 
-> Do you have a Gemini API key? If not, get one free at https://aistudio.google.com/apikey
->
-> The free tier includes 1,500 requests/day for embedding — more than enough for personal use.
-
-Wait for the user to provide the key.
+For Gemini (default, free tier):
+> Get a free Gemini API key at https://aistudio.google.com/apikey — 1,500 requests/day for embedding.
 
 ## Phase 2: Apply Code Changes
 
@@ -48,29 +74,24 @@ git remote add upstream https://github.com/qwibitai/nanoclaw.git
 ### Merge the skill branch
 
 ```bash
-git fetch upstream skill/add-lancedb-memory
-git merge upstream/skill/add-lancedb-memory
+git fetch upstream feat/memory-lancedb-pro
+git merge upstream/feat/memory-lancedb-pro
 ```
 
 This merges in:
-- `container/agent-runner/src/memory.ts` (LanceDB + Gemini embedding logic)
-- Memory MCP tools in `container/agent-runner/src/ipc-mcp-stdio.ts` (memory_store, memory_search, memory_delete, memory_count)
-- `@lancedb/lancedb` and `apache-arrow` dependencies in `container/agent-runner/package.json`
-- `GEMINI_API_KEY`, `LANCEDB_URI`, `LANCEDB_API_KEY` env passthrough in `src/container-runner.ts`
-- `scripts/migrate-memories.mjs` (optional migration tool for OpenClaw backups)
+- `container/agent-runner/src/memory.ts` — public API and provider config
+- `container/agent-runner/src/memory-store.ts` — LanceDB storage layer
+- `container/agent-runner/src/memory-retriever.ts` — hybrid retrieval pipeline
+- `container/agent-runner/src/memory-embedder.ts` — OpenAI-compatible embedding with chunking and key rotation
+- `container/agent-runner/src/memory-chunker.ts` — smart document chunking
+- `container/agent-runner/src/memory-access-tracker.ts` — reinforcement-based time decay
+- `container/agent-runner/src/memory-noise-filter.ts` — trivial content filtering
+- `container/agent-runner/src/memory-query-expander.ts` — query expansion stub
+- Memory MCP tools in `container/agent-runner/src/ipc-mcp-stdio.ts`
+- All embedding/rerank env var passthrough in `src/container-runner.ts`
+- `scripts/migrate-memories.mjs` — migration tool for OpenClaw backups
 
 If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
-
-### Copy to per-group agent-runner
-
-Existing groups have a cached copy of the agent-runner source. Copy the new files:
-
-```bash
-for dir in data/sessions/*/agent-runner-src; do
-  cp container/agent-runner/src/memory.ts "$dir/"
-  cp container/agent-runner/src/ipc-mcp-stdio.ts "$dir/"
-done
-```
 
 ### Validate code changes
 
@@ -83,12 +104,31 @@ Build must be clean before proceeding.
 
 ## Phase 3: Configure
 
-### Set Gemini API key
+### Set embedding provider
 
-Add to `.env`:
+Add to `.env` (example for Gemini, the default):
 
 ```bash
+EMBEDDING_PROVIDER=gemini
 GEMINI_API_KEY=your-gemini-api-key-here
+```
+
+For Jina:
+```bash
+EMBEDDING_PROVIDER=jina
+JINA_API_KEY=your-jina-api-key-here
+```
+
+For Ollama (local, no API key needed):
+```bash
+EMBEDDING_PROVIDER=ollama
+```
+
+### Set rerank provider (optional)
+
+```bash
+RERANK_PROVIDER=jina
+JINA_API_KEY=your-jina-api-key-here  # shared with embedding if using Jina for both
 ```
 
 ### LanceDB Cloud (optional)
@@ -100,21 +140,15 @@ LANCEDB_URI=db://your-database
 LANCEDB_API_KEY=your-lancedb-api-key
 ```
 
-The local path can be overridden per-container with the `MEMORY_LANCEDB_DIR` environment variable.
-
-### Sync environment
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
-
 ### Restart the service
 
 ```bash
 # macOS:
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 # Linux:
-# systemctl --user restart nanoclaw
+systemctl --user restart nanoclaw
+# Or:
+./scripts/rebuild.sh
 ```
 
 ## Phase 4: Verify
@@ -137,20 +171,20 @@ tail -f logs/nanoclaw.log | grep -i memory
 
 Look for:
 - `memory_store` / `memory_search` in container logs — agent used memory tools
-- Errors with "GEMINI_API_KEY" — key not set or invalid
+- Embedding or API key errors — key not set or invalid
 
 ## Troubleshooting
 
-### "GEMINI_API_KEY not set"
+### Embedding API key not set
 
 The key isn't reaching the container. Verify:
-1. `.env` has `GEMINI_API_KEY=...`
-2. `data/env/env` is synced: `cp .env data/env/env`
-3. Service was restarted after changing `.env`
+1. `.env` has the correct `*_API_KEY` for your provider
+2. Service was restarted after changing `.env`
+3. Check `src/container-runner.ts` passes the env var (all standard providers are pre-configured)
 
-### "Gemini embedding failed (400)"
+### Embedding failed (400/context length)
 
-Usually means the text is too long. Gemini `embedding-001` has an 8192-token limit per request. If storing very long memories, truncate or summarize first.
+Text exceeds the model's context limit. The embedder auto-chunks long documents, but if chunking also fails, truncate or summarize the text first.
 
 ### Memories not persisting across sessions
 
@@ -165,19 +199,19 @@ The agent may not know about the tools. Try being explicit: "use the memory_stor
 To import memories from an OpenClaw JSONL backup:
 
 ```bash
-GEMINI_API_KEY=your-key node scripts/migrate-memories.mjs path/to/backup.jsonl
+EMBEDDING_API_KEY=your-key node scripts/migrate-memories.mjs path/to/backup.jsonl /path/to/lancedb-dir
 ```
 
-This re-embeds each memory with Gemini and stores it in LanceDB.
+Supports `EMBEDDING_MODEL`, `EMBEDDING_BASE_URL` env vars to use any provider. Streams records in batches to handle large backups.
 
 ## Removal
 
 To remove semantic memory:
 
-1. Remove `memory.ts` from `container/agent-runner/src/`
-2. Remove memory tool registrations from `container/agent-runner/src/ipc-mcp-stdio.ts` (the 4 `server.tool` blocks for `memory_store`, `memory_search`, `memory_delete`, `memory_count` and the `import` line)
-3. Remove `@lancedb/lancedb` and `apache-arrow` from `container/agent-runner/package.json`
-4. Remove `GEMINI_API_KEY` / `LANCEDB_URI` / `LANCEDB_API_KEY` passthrough from `src/container-runner.ts`
-5. Remove env vars from `.env` and `data/env/env`
+1. Remove `memory*.ts` files from `container/agent-runner/src/`
+2. Remove memory tool registrations from `container/agent-runner/src/ipc-mcp-stdio.ts`
+3. Remove `@lancedb/lancedb`, `apache-arrow`, `openai` from `container/agent-runner/package.json`
+4. Remove embedding/rerank env var passthrough from `src/container-runner.ts`
+5. Remove env vars from `.env`
 6. Rebuild: `npm run build && ./container/build.sh`
 7. Restart service
