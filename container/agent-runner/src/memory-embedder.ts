@@ -606,7 +606,7 @@ export class Embedder {
       // Fill empty arrays for invalid texts
       for (let i = 0; i < texts.length; i++) {
         if (!results[i]) {
-          results[i] = [];
+          results[i] = new Array(this.dimensions).fill(0);
         }
       }
 
@@ -642,7 +642,10 @@ export class Embedder {
                 new Array(this.dimensions).fill(0)
               );
 
-              const finalEmbedding = avgEmbedding.map((v) => v / embeddings.length);
+              const rawAvg = avgEmbedding.map((v) => v / embeddings.length);
+              // L2-normalize so cosine similarity remains valid after averaging
+              const norm = Math.sqrt(rawAvg.reduce((s, v) => s + v * v, 0)) || 1;
+              const finalEmbedding = rawAvg.map((v) => v / norm);
 
               // Cache the averaged embedding for the original (long) text.
               this._cache.set(text, task, finalEmbedding);
@@ -660,14 +663,14 @@ export class Embedder {
               this.validateEmbedding(embedding);
               results[index] = embedding;
             } else {
-              results[index] = [];
+              results[index] = new Array(this.dimensions).fill(0);
             }
           });
 
           // Fill empty arrays for invalid texts
           for (let i = 0; i < texts.length; i++) {
             if (!results[i]) {
-              results[i] = [];
+              results[i] = new Array(this.dimensions).fill(0);
             }
           }
 
