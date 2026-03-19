@@ -51,6 +51,8 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  /** Local file paths for any downloaded media attachments */
+  attachments?: string[];
 }
 
 export interface ScheduledTask {
